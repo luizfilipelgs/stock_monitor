@@ -1,12 +1,17 @@
 import sqlite3
-from celery import Celery
-from time import sleep
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service as ChromeService
 
+import requests
+from celery import Celery
+
+
+REQUEST_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    ),
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+}
+BRAPI_QUOTE_URL = 'https://brapi.dev/api/quote/{symbol}'
 
 app = Celery(
     main='tasks',
@@ -15,36 +20,41 @@ app = Celery(
 )
 
 
+def normalize_symbol(stock_name: str) -> str:
+    return stock_name.strip().upper().removesuffix('.SA')
+
+
+def extract_price(payload: dict) -> float:
+    results = payload.get('results') or []
+    if not results:
+        raise RuntimeError('Brapi retornou resposta sem cotacao.')
+
+    price = results[0].get('regularMarketPrice')
+    if price is None:
+        raise RuntimeError('Nao foi possivel localizar o preco da acao no JSON.')
+
+    return float(price)
+
+
+def fetch_stock_price(stock_name: str) -> tuple[str, float]:
+    symbol = normalize_symbol(stock_name)
+    url = BRAPI_QUOTE_URL.format(symbol=symbol)
+
+    response = requests.get(url, headers=REQUEST_HEADERS, timeout=15)
+    response.raise_for_status()
+
+    return symbol, extract_price(response.json())
+
+
 @app.task
-def get_stock_price(stock_name):
-    driver = webdriver.Chrome(
-        service=ChromeService
-        (ChromeDriverManager().install())
-    )
-
-    url = 'https://www.google.com'
-
-    driver.get(url)
-
-    search_input = driver.find_element(
-        By.XPATH,
-        '//textarea[@aria-label="Pesquisar"]'
-    )
-    search_input.send_keys(f'preço da ação {stock_name}')
-    search_input.send_keys(Keys.ENTER)
-
-    sleep(2)
-
-    price_div = driver.find_element(
-        By.XPATH,
-        '//div[@data-attrid="Price"]'
-    )
-    price = price_div.find_elements(
-        By.TAG_NAME,
-        'span'
-    )[2].text.replace(',', '.')
-
-    driver.quit()
+def get_stock_price(stock_name: str) -> float:
+    try:
+        symbol, price = fetch_stock_price(stock_name)
+    except requests.RequestException as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code == 429:
+            raise RuntimeError('Brapi recusou a requisicao por excesso de chamadas.') from exc
+        raise RuntimeError('Falha ao buscar a cotacao na Brapi.') from exc
 
     with sqlite3.connect('stocks.db') as conn:
         cursor = conn.cursor()
@@ -59,9 +69,9 @@ def get_stock_price(stock_name):
         ''')
 
         cursor.execute('''
-        INSERT OR IGNORE INTO STOCKS (stock_name, price)
+        INSERT INTO STOCKS (stock_name, price)
         VALUES (?, ?)
-        ''', (stock_name, price))
+        ''', (symbol, price))
 
         conn.commit()
 
