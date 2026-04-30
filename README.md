@@ -1,7 +1,7 @@
 # Monitor de Acoes com Alertas Simples
 
 Async stock monitoring system built with FastAPI, Celery, RabbitMQ and Flower.
-It allows users to register stocks with min/max price alerts, periodically fetches
+It allows users to register stocks with multiple above/below threshold alerts, periodically fetches
 stock prices from Brapi, stores price history and logs triggered alerts.
 
 ## Stack
@@ -17,6 +17,14 @@ stock prices from Brapi, stores price history and logs triggered alerts.
 ## Run with Docker Compose
 
 ```bash
+docker compose up --build
+```
+
+If you are updating from an older version of the project, recreate the local
+Docker volume because the alert schema changed:
+
+```bash
+docker compose down -v
 docker compose up --build
 ```
 
@@ -83,16 +91,8 @@ RabbitMQ credentials:
 ### Example alert batch payload
 
 ```json
-[
-  {
-    "min_price": 35.0,
-    "max_price": 40.0,
-    "active": true
-  },
-  {
-    "min_price": 32.0,
-    "max_price": 45.0,
-    "active": true
-  }
-]
+{
+  "below": [80.0, 78.0, 75.0],
+  "above": [90.0, 95.0]
+}
 ```

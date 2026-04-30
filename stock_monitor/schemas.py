@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import AlertState, TriggerType
-from .utils import normalize_symbol, validate_alert_bounds
+from .utils import normalize_symbol, validate_threshold_price
 
 
 class StockCreate(BaseModel):
@@ -34,36 +34,49 @@ class StockUpdate(BaseModel):
         return self
 
 
-class AlertCreate(BaseModel):
-    min_price: float | None = Field(default=None, ge=0)
-    max_price: float | None = Field(default=None, ge=0)
-    active: bool = True
+class AlertBatchCreate(BaseModel):
+    below: list[float] = Field(default_factory=list)
+    above: list[float] = Field(default_factory=list)
+
+    @field_validator('below', 'above')
+    @classmethod
+    def validate_threshold_list(cls, values: list[float]) -> list[float]:
+        normalized_values = [validate_threshold_price(value) for value in values]
+        if len(set(normalized_values)) != len(normalized_values):
+            raise ValueError('Threshold values must not contain duplicates in the same list.')
+        return normalized_values
 
     @model_validator(mode='after')
-    def validate_bounds(self) -> 'AlertCreate':
-        validate_alert_bounds(self.min_price, self.max_price)
+    def ensure_any_threshold(self) -> 'AlertBatchCreate':
+        if not self.below and not self.above:
+            raise ValueError('At least one threshold must be provided in below or above.')
         return self
 
 
 class AlertUpdate(BaseModel):
-    min_price: float | None = Field(default=None, ge=0)
-    max_price: float | None = Field(default=None, ge=0)
+    trigger_type: TriggerType | None = None
+    target_price: float | None = Field(default=None, gt=0)
     active: bool | None = None
+
+    @field_validator('target_price')
+    @classmethod
+    def validate_threshold(cls, value: float | None) -> float | None:
+        if value is None:
+            return value
+        return validate_threshold_price(value)
 
     @model_validator(mode='after')
     def validate_payload(self) -> 'AlertUpdate':
         if not self.model_fields_set:
             raise ValueError('At least one field must be provided.')
-        if 'min_price' in self.model_fields_set and 'max_price' in self.model_fields_set:
-            validate_alert_bounds(self.min_price, self.max_price)
         return self
 
 
 class AlertRead(BaseModel):
     id: int
     stock_id: int
-    min_price: float | None
-    max_price: float | None
+    trigger_type: TriggerType
+    target_price: float
     active: bool
     current_state: AlertState
     created_at: datetime

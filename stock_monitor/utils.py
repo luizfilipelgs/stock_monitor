@@ -5,9 +5,7 @@ def normalize_symbol(symbol: str) -> str:
     return normalized
 
 
-def validate_alert_bounds(min_price: float | None, max_price: float | None) -> None:
-    if min_price is None and max_price is None:
-        raise ValueError('At least one of min_price or max_price must be provided.')
-
-    if min_price is not None and max_price is not None and min_price >= max_price:
-        raise ValueError('min_price must be lower than max_price.')
+def validate_threshold_price(value: float) -> float:
+    if value <= 0:
+        raise ValueError('target_price must be greater than zero.')
+    return value

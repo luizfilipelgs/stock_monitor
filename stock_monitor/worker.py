@@ -34,29 +34,29 @@ init_db()
 
 
 def evaluate_alert_state(price: float, alert: Alert) -> AlertState:
-    if alert.min_price is not None and price < alert.min_price:
-        return AlertState.BELOW_MIN
-    if alert.max_price is not None and price > alert.max_price:
-        return AlertState.ABOVE_MAX
+    if alert.trigger_type == TriggerType.BELOW and price < alert.target_price:
+        return AlertState.BELOW
+    if alert.trigger_type == TriggerType.ABOVE and price > alert.target_price:
+        return AlertState.ABOVE
     return AlertState.NORMAL
 
 
 def build_trigger_message(symbol: str, alert: Alert, price: float, state: AlertState) -> str:
-    if state == AlertState.BELOW_MIN:
+    if state == AlertState.BELOW:
         return (
-            f'{symbol} is below the configured minimum '
-            f'({price:.2f} < {alert.min_price:.2f}).'
+            f'{symbol} is below the configured threshold '
+            f'({price:.2f} < {alert.target_price:.2f}).'
         )
     return (
-        f'{symbol} is above the configured maximum '
-        f'({price:.2f} > {alert.max_price:.2f}).'
+        f'{symbol} is above the configured threshold '
+        f'({price:.2f} > {alert.target_price:.2f}).'
     )
 
 
 def build_trigger_type(state: AlertState) -> TriggerType:
-    if state == AlertState.BELOW_MIN:
-        return TriggerType.BELOW_MIN
-    return TriggerType.ABOVE_MAX
+    if state == AlertState.BELOW:
+        return TriggerType.BELOW
+    return TriggerType.ABOVE
 
 
 @app.task(name='tasks.collect_active_stock_prices')

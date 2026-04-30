@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .db import get_db, init_db
-from .models import Alert, AlertState, Stock, StockPrice, TriggeredAlert
+from .models import Alert, AlertState, Stock, StockPrice, TriggerType, TriggeredAlert
 from .schemas import (
-    AlertCreate,
+    AlertBatchCreate,
     AlertRead,
     AlertUpdate,
     StockCreate,
@@ -17,7 +17,6 @@ from .schemas import (
     StockUpdate,
     TriggeredAlertRead,
 )
-from .utils import validate_alert_bounds
 
 
 @asynccontextmanager
@@ -86,7 +85,12 @@ def update_stock(stock_id: int, payload: StockUpdate, db: Session = Depends(get_
         if duplicate is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Stock already exists.')
         stock.symbol = payload.symbol
-        for alert in stock.alerts:
+        stock_alerts = list(
+            db.scalars(
+                select(Alert).where(Alert.stock_id == stock.id)
+            ).all()
+        )
+        for alert in stock_alerts:
             alert.current_state = AlertState.NORMAL
 
     if payload.active is not None:
@@ -106,19 +110,43 @@ def delete_stock(stock_id: int, db: Session = Depends(get_db)) -> Response:
 
 
 @app.post('/stocks/{stock_id}/alerts', response_model=list[AlertRead], status_code=status.HTTP_201_CREATED)
-def create_alerts(stock_id: int, payload: list[AlertCreate], db: Session = Depends(get_db)) -> list[Alert]:
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Alert payload must not be empty.')
-
+def create_alerts(stock_id: int, payload: AlertBatchCreate, db: Session = Depends(get_db)) -> list[Alert]:
     stock = get_stock_or_404(db, stock_id)
     alerts: list[Alert] = []
+    requested_thresholds = (
+        [(TriggerType.BELOW, value) for value in payload.below] +
+        [(TriggerType.ABOVE, value) for value in payload.above]
+    )
+    existing_alerts = list(
+        db.scalars(
+            select(Alert).where(Alert.stock_id == stock.id)
+        ).all()
+    )
+    existing_thresholds = {
+        (alert.trigger_type, alert.target_price)
+        for alert in existing_alerts
+    }
 
-    for item in payload:
+    duplicates = [
+        {'trigger_type': trigger_type.value, 'target_price': target_price}
+        for trigger_type, target_price in requested_thresholds
+        if (trigger_type, target_price) in existing_thresholds
+    ]
+    if duplicates:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                'message': 'Alert threshold already exists for this stock.',
+                'duplicates': duplicates,
+            },
+        )
+
+    for trigger_type, target_price in requested_thresholds:
         alert = Alert(
             stock_id=stock.id,
-            min_price=item.min_price,
-            max_price=item.max_price,
-            active=item.active,
+            trigger_type=trigger_type,
+            target_price=target_price,
+            active=True,
             current_state=AlertState.NORMAL,
         )
         alerts.append(alert)
@@ -172,14 +200,24 @@ def list_triggered_alerts(stock_id: int, db: Session = Depends(get_db)) -> list[
 def update_alert(alert_id: int, payload: AlertUpdate, db: Session = Depends(get_db)) -> Alert:
     alert = get_alert_or_404(db, alert_id)
 
-    min_price = payload.min_price if 'min_price' in payload.model_fields_set else alert.min_price
-    max_price = payload.max_price if 'max_price' in payload.model_fields_set else alert.max_price
-    validate_alert_bounds(min_price, max_price)
+    next_trigger_type = payload.trigger_type if 'trigger_type' in payload.model_fields_set else alert.trigger_type
+    next_target_price = payload.target_price if 'target_price' in payload.model_fields_set else alert.target_price
 
-    if 'min_price' in payload.model_fields_set:
-        alert.min_price = payload.min_price
-    if 'max_price' in payload.model_fields_set:
-        alert.max_price = payload.max_price
+    duplicate = db.scalar(
+        select(Alert).where(
+            Alert.stock_id == alert.stock_id,
+            Alert.id != alert.id,
+            Alert.trigger_type == next_trigger_type,
+            Alert.target_price == next_target_price,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Alert threshold already exists.')
+
+    if 'trigger_type' in payload.model_fields_set:
+        alert.trigger_type = payload.trigger_type
+    if 'target_price' in payload.model_fields_set:
+        alert.target_price = payload.target_price
     if 'active' in payload.model_fields_set:
         alert.active = payload.active
 

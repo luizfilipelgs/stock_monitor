@@ -13,13 +13,13 @@ def utcnow() -> datetime:
 
 class AlertState(str, Enum):
     NORMAL = 'NORMAL'
-    BELOW_MIN = 'BELOW_MIN'
-    ABOVE_MAX = 'ABOVE_MAX'
+    BELOW = 'BELOW'
+    ABOVE = 'ABOVE'
 
 
 class TriggerType(str, Enum):
-    BELOW_MIN = 'BELOW_MIN'
-    ABOVE_MAX = 'ABOVE_MAX'
+    BELOW = 'BELOW'
+    ABOVE = 'ABOVE'
 
 
 class Stock(Base):
@@ -52,8 +52,8 @@ class Alert(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     stock_id: Mapped[int] = mapped_column(ForeignKey('stocks.id', ondelete='CASCADE'), index=True)
-    min_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    max_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trigger_type: Mapped[TriggerType] = mapped_column(SqlEnum(TriggerType, native_enum=False), nullable=False)
+    target_price: Mapped[float] = mapped_column(Float, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     current_state: Mapped[AlertState] = mapped_column(
         SqlEnum(AlertState, native_enum=False),
