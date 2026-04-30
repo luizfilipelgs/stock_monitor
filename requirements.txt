@@ -1,0 +1,9 @@
+selenium
+webdriver-manager
+celery
+flower
+sqlalchemy
+fastapi
+uvicorn
+pika
+python-dotenv
