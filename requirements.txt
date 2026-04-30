@@ -4,5 +4,3 @@ flower
 sqlalchemy
 fastapi
 uvicorn
-pika
-python-dotenv
